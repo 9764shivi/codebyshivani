@@ -1,2 +1,2 @@
-Name:Shivani Sopan Hondale
+Author:Shivani Sopan Hondale
 Collage Name: MIT collage of engineering Aurangabad
