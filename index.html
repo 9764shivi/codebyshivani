@@ -1,0 +1,230 @@
+
+<!--
+Single-file Fake Link Detector website
+Instructions:
+1. Save this file as index.html.
+2. Open it in any browser (desktop or mobile) to use the client-only demo.
+3. To host publicly: push to GitHub and enable Pages, or upload to any static-file host (Netlify, Vercel, Firebase Hosting).
+
+Notes: This is a client-side heuristic detector (no backend). It uses URL features (https, ip address, suspicious words, length, special chars) to compute a risk score and explain why a URL is suspicious. For production use add server-side checks, WHOIS/domain-age lookup, certificate checks, and ML model.
+--><!doctype html>
+
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Fake Link Detector</title>
+  <style>
+    :root{--bg:#fbfbfc;--card:#fff;--accent:#d9392b;--muted:#666}
+    *{box-sizing:border-box;font-family:Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+    body{margin:0;background:linear-gradient(180deg,#f7f8fa, #fbfbff);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+    .card{width:100%;max-width:720px;background:var(--card);border-radius:14px;padding:22px;box-shadow:0 8px 30px rgba(16,24,40,0.08)}
+    .flex{display:flex;gap:12px}
+    h1{margin:0;font-size:22px}
+    p.lead{margin:6px 0 18px;color:var(--muted)}
+.input-row{display:flex;gap:12px;align-items:center}
+    input[type=url]{flex:1;padding:12px 14px;border-radius:10px;border:1px solid #e6e9ef;font-size:15px}
+    button{background:var(--accent);color:#fff;border:none;padding:12px 16px;border-radius:10px;font-weight:600;cursor:pointer}
+    button.secondary{background:transparent;color:var(--accent);border:1px solid #eee}
+    .result{margin-top:18px;padding:14px;border-radius:10px;font-weight:600}
+    .safe{background:#e9fff1;color:#0a7a3f;border:1px solid rgba(10,122,63,0.12)}
+    .warn{background:#fff6ea;color:#8a5a00;border:1px solid rgba(138,90,0,0.12)}
+    .danger{background:#fff1f1;color:#b91c1c;border:1px solid rgba(185,28,28,0.08)}
+    .reasons{margin-top:12px;color:#333}
+    .chip{display:inline-block;padding:6px 10px;border-radius:999px;background:#f1f5f9;margin:6px 6px 0 0;font-size:13px}
+    .reports{margin-top:16px;font-size:14px}
+    footer{margin-top:18px;color:var(--muted);font-size:13px}
+    @media (max-width:480px){.card{padding:16px}h1{font-size:18px}}
+  </style>
+</head>
+<body>
+  <main class="card">
+    <header>
+      <div style="display:flex;align-items:center;gap:12px">
+        <svg width="44" height="44" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 2L3 5v6c0 5 3.9 9.9 9 11 5.1-1.1 9-6 9-11V5l-9-3z" fill="#d9392b"/><path d="M9.5 9.5l5 5M14.5 9.5l-5 5" stroke="#fff" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <div>
+          <h1>Fake Link Detector</h1>
+          <p class="lead">Paste a URL below to check whether it's safe, suspicious, or a phishing link.</p>
+        </div>
+      </div>
+    </header><section style="margin-top:12px">
+  <div class="input-row">
+    <input id="urlInput" type="url" placeholder="https://example.com/your-link" aria-label="URL input" />
+    <button id="checkBtn">Check Link</button>
+    <button id="reportBtn" class="secondary">Report</button>
+  </div>
+
+  <div id="resultBox" style="display:none" class="result">
+    <div id="resultText"></div>
+    <div id="scoreChip" class="chip" style="margin-top:8px"></div>
+    <div id="reasons" class="reasons"></div>
+  </div>
+
+  <div class="reports">
+    <strong>Reported links (local)</strong>
+    <div id="reportsList">No reports yet.</div>
+  </div>
+<footer>
+    <small>Client-side demo. For production: add backend checks (WHOIS, TLS cert, page content scanning, ML model, blocklist lookup).</small>
+  </footer>
+</section>
+
+  </main><script>
+(function(){
+  const suspiciousWords = ["login","update","secure","verify","bank","confirm","account","password","click","free","reward","win","offer","ebay","paypal","amazon"];
+  const urlInput = document.getElementById('urlInput');
+  const checkBtn = document.getElementById('checkBtn');
+  const reportBtn = document.getElementById('reportBtn');
+  const resultBox = document.getElementById('resultBox');
+  const resultText = document.getElementById('resultText');
+  const reportList = document.getElementById('reportsList');
+  const reasonsDiv = document.getElementById('reasons');
+  const scoreChip = document.getElementById('scoreChip');
+
+  function isIpInHostname(host){
+    // matches IPv4 addresses
+    return /^(?:\d{1,3}\.){3}\d{1,3}$/.test(host) || /^(?:https?:\/\/)?(\d{1,3}\.){3}\d{1,3}(?::\d+)?/.test(host);
+  }
+
+  function extractHostname(url){
+    try{
+      if(!/^https?:\/\//i.test(url)) url = 'http://' + url;
+      const u = new URL(url);
+      return u.hostname; 
+    }catch(e){
+      return null;
+ }
+  }
+
+  function analyze(url){
+    const reasons = [];
+    let score = 0; // higher = more risky
+    if(!url) return {score:0,reasons:["No URL provided"]};
+
+    // basic format
+    const hostname = extractHostname(url);
+    if(!hostname){reasons.push('Invalid URL format'); score += 40; return {score,reasons};}
+
+    // check https
+    if(!/^https:\/\//i.test(url)){
+      reasons.push('Not using HTTPS'); score += 15;
+    }
+
+    // length check
+    if(url.length > 75){ reasons.push('URL is unusually long'); score += 12; }
+    if(url.length > 120){ reasons.push('Very long URL — commonly used in phishing'); score += 14; }
+
+    // suspicious characters
+    const specialChars = /[@#$%^*(),<>\\\\👦👦{}~]/;
+    if(specialChars.test(url)){ reasons.push('URL contains suspicious special characters'); score += 10; }
+
+    // presence of @ (redirect token)
+    if(url.indexOf('@') !== -1){ reasons.push('Contains "@" sign (often used to obfuscate real domain)'); score += 20; }
+
+    // many subdomains
+    const parts = hostname.split('.');
+    if(parts.length >= 4){ reasons.push('Multiple subdomains (can be used to mimic trusted domains)'); score += 10; }
+ // ip address instead of domain
+    if(isIpInHostname(hostname)){
+      reasons.push('Hostname is an IP address — suspicious'); score += 25;
+    }
+
+    // suspicious words
+    const low = url.toLowerCase();
+    const found = suspiciousWords.filter(w => low.includes(w));
+    if(found.length){ reasons.push('Contains suspicious words: ' + found.join(', ')); score += Math.min(20, found.length*8); }
+
+    // hyphen and many dashes in domain
+    const domain = parts.slice(-2).join('.');
+    if(domain && domain.indexOf('-') !== -1){ reasons.push('Hyphen in domain name (common in look-alike domains)'); score += 8; }
+
+    // punycode (xn-- )
+    if(hostname.indexOf('xn--') !== -1){ reasons.push('Contains punycode sequence — potential homograph attack'); score += 18; }
+
+    // simple heuristic for known safe roots (you can expand)
+    const safeRoots = ['gov.in','nic.in','edu','bank','onlinesbi','icici','amazon','paypal','facebook'];
+    const isSafeRoot = safeRoots.some(r => hostname.toLowerCase().includes(r));
+    if(isSafeRoot){ score -= 30; reasons.push('Domain contains known trusted keyword (heuristic)'); }
+
+    // normalize score
+    score = Math.max(0, score);
+    if(score > 100) score = 100;
+
+    return {score, reasons};
+  }
+
+function displayResult(url){
+    const res = analyze(url);
+    resultBox.style.display = 'block';
+    scoreChip.textContent = 'Risk score: ' + res.score + '/100';
+    reasonsDiv.innerHTML = '';
+    if(res.reasons && res.reasons.length){
+      res.reasons.forEach(r => {
+        const d = document.createElement('div'); d.textContent = '• ' + r; reasonsDiv.appendChild(d);
+      });
+    }
+
+    if(res.score < 25){
+      resultBox.className = 'result safe';
+      resultText.textContent = 'Safe — low risk';
+    } else if(res.score < 60){
+      resultBox.className = 'result warn';
+      resultText.textContent = 'Suspicious — be careful';
+    } else {
+      resultBox.className = 'result danger';
+      resultText.textContent = 'Fraudulent — likely phishing';
+    }
+  }
+
+  // local reports list
+  function getReports(){
+    try{ return JSON.parse(localStorage.getItem('fld_reports')||'[]'); }catch(e){return []}
+  }
+  function saveReport(url){
+    const list = getReports();
+    list.unshift({url, ts: new Date().toISOString()});
+    localStorage.setItem('fld_reports', JSON.stringify(list.slice(0,200)));
+    renderReports();
+  }
+  function renderReports() {
+  const list = getReports();
+  if (!list.length) {
+    reportList.innerHTML = 'No reports yet.';
+    return;
+  }
+  reportList.innerHTML = '';
+  
+  list.forEach(it => {
+    const el = document.createElement('div');
+    el.style.marginTop = '8px';
+    el.style.padding = '8px';
+    el.style.border = '1px solid #f1f3f5';
+    el.style.borderRadius = '8px';
+    
+    el.innerHTML = `
+      <div style="font-weight:600;">${escapeHtml(it.url)}</div>
+      <div style="font-size:12px; color:#666; margin-top:4px;">
+        reported: ${new Date(it.ts).toLocaleString()}
+      </div>
+    `;
+    
+    reportList.appendChild(el);
+  });
+}
+  function escapeHtml(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+  checkBtn.addEventListener('click', ()=>{
+    const url = urlInput.value.trim();
+    displayResult(url);
+  });
+  urlInput.addEventListener('keydown', (e)=>{ if(e.key === 'Enter') { checkBtn.click(); } });
+  reportBtn.addEventListener('click', ()=>{
+    const url = urlInput.value.trim();
+    if(!url){ alert('Paste the URL you want to report.'); return; }
+    if(confirm('Report this URL to your local report list?')){ saveReport(url); alert('Reported locally.'); }
+  });
+ // initial
+  renderReports();
+})();
+</script></body>
+</html>
